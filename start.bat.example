@@ -1,0 +1,10 @@
+@echo off
+rem 复制本文件为 start.bat, 填入自己的凭证后双击使用
+rem 注意: SESSDATA 中的 % 需写成 %% (例如 %2C 要写成 %%2C)
+title bilibili jury auto-vote
+cd /d "%~dp0"
+echo Keep this window OPEN. Close it to STOP.
+bilibiliJudgement-fixed.exe <your_bili_jct> "your_SESSDATA"
+echo.
+echo Program exited. See log above.
+pause

@@ -1,0 +1,11 @@
+# 构建产物
+*.exe
+*.zip
+
+# 本地启动脚本含真实登录凭证(SESSDATA), 严禁提交
+start.bat
+
+# 临时目录
+tmp/
+
+.idea/
