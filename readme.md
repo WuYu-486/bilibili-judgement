@@ -11,3 +11,5 @@ go build -o bilibiliJudgement.exe .
 ```
 
 Windows 双击挂机可参考 `start.bat.example`（复制为 `start.bat` 使用）。
+
+<img width="264" height="270" alt="OIP (1)" src="https://github.com/user-attachments/assets/3ef9b3f2-a744-464c-878a-4f0039cac90f" />
