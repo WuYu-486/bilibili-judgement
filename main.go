@@ -18,15 +18,25 @@ var logger = log.New(os.Stderr)
 func main() {
 	logger.Info("Version	", Version, "	Running...")
 	split()
-	logger.Info("Arguments")
-	split()
-	if len(os.Args) < 3 {
-		logger.Fatalf("usage: %s <csrf(bili_jct)> <sessdata(SESSDATA)>", os.Args[0])
+	// 凭证获取优先级: 命令行参数 > 本地 cookies.txt > 扫码登录
+	if len(os.Args) >= 3 {
+		csrf = os.Args[1]
+		sessdata = os.Args[2]
+		logger.Info("使用命令行参数提供的凭证")
+	} else {
+		if c, s, err := loadCookies(); err == nil {
+			csrf, sessdata = c, s
+			logger.Info("已从 ", cookieFile, " 载入凭证")
+		} else {
+			c, s, err := qrLogin()
+			if err != nil {
+				logger.Fatal("扫码登录失败: ", err.Error())
+			}
+			csrf, sessdata = c, s
+			saveCookies(csrf, sessdata)
+			logger.Info("登录成功, 凭证已保存到 ", cookieFile, ", 下次启动免扫码")
+		}
 	}
-	csrf = os.Args[1]
-	sessdata = os.Args[2]
-	logger.Info("SESSDATA:	", sessdata)
-	logger.Info("CSRF:	", csrf)
 	split()
 	juryInfo, err := getJuryInfo()
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -116,6 +117,11 @@ func postVote(caseId string, vote int) (ResData, error) {
 }
 
 func request(method string, api string, param map[string]string) (ResData, error) {
+	return doRequest(method, api, param, true)
+}
+
+// doRequest 执行实际请求; allowRelogin 控制 -101 时是否自动重新扫码登录(防止无限递归)
+func doRequest(method string, api string, param map[string]string, allowRelogin bool) (ResData, error) {
 	var req *http.Request
 	var err error
 	if method == "POST" {
@@ -158,14 +164,38 @@ func request(method string, api string, param map[string]string) (ResData, error
 		return ResData{}, err
 	}
 	if rd.Code != 0 {
+		// 凭证失效: 自动扫码重登并重试一次(仅非命令行参数模式)
+		if rd.Code == -101 && allowRelogin && relogin() {
+			return doRequest(method, api, param, false)
+		}
 		return ResData{}, &APIError{Code: rd.Code, Message: rd.Message}
 	}
 	return rd, nil
 }
 
+// relogin 重新扫码登录, 成功后更新全局凭证并保存; 命令行参数模式不自动重登
+func relogin() bool {
+	if len(os.Args) >= 3 {
+		return false
+	}
+	logger.Warn("凭证已失效, 自动重新扫码登录...")
+	c, s, err := qrLogin()
+	if err != nil {
+		logger.Warn("重新登录失败: ", err.Error())
+		return false
+	}
+	csrf, sessdata = c, s
+	saveCookies(csrf, sessdata)
+	logger.Info("重新登录成功, 凭证已更新到 ", cookieFile)
+	return true
+}
+
+// userAgent 统一的浏览器 UA
+const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+
 func addHeader(header *http.Header) {
 	header.Set("cookie", "bili_jct="+csrf+"; SESSDATA="+sessdata+";")
-	header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36")
+	header.Set("User-Agent", userAgent)
 	header.Set("Referer", "https://www.bilibili.com/")
 	header.Set("Origin", "https://www.bilibili.com")
 }

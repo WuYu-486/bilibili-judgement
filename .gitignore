@@ -1,8 +1,11 @@
 # 构建产物
 *.exe
+*.exe~
 *.zip
 
-# 本地启动脚本含真实登录凭证(SESSDATA), 严禁提交
+# 登录凭证与本地产物, 严禁提交
+cookies.txt
+qr.png
 start.bat
 
 # 临时目录
