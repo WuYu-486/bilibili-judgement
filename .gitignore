@@ -1,14 +1,26 @@
 # 构建产物
 *.exe
 *.exe~
+bilibiliJudgement-linux-*
 *.zip
 
 # 登录凭证与本地产物, 严禁提交
 cookies.txt
 qr.png
 start.bat
+移动云服务器信息.md
+贴吧自动签到部署规划.md
+贴吧凭证更新指南.md
+run-log.txt
+run-*.log
+tieba-sign/cookies
+notify.ini
+cacert.pem
+mail-task.log
+report-task.bat
 
-# 临时目录
+# 临时目录与工具产物
 tmp/
+image_*-analysis-*.md
 
 .idea/

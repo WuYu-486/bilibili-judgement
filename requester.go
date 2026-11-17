@@ -5,7 +5,6 @@ import (
 	"errors"
 	"github.com/mitchellh/mapstructure"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -104,13 +103,12 @@ func getOpinion(caseId string, pg int, ps int) (opinion, error) {
 	return o, nil
 }
 
-func postVote(caseId string, vote int) (ResData, error) {
-	insiders := strconv.Itoa(rand.Intn(2))
+func postVote(caseId string, vote int, content string) (ResData, error) {
 	return request("POST", voteURL, map[string]string{
 		"case_id":   caseId,
 		"vote":      strconv.Itoa(vote),
-		"insiders":  insiders,
-		"content":   "",
+		"insiders":  "0",
+		"content":   content,
 		"anonymous": "1",
 		"csrf":      csrf,
 	})
@@ -122,6 +120,8 @@ func request(method string, api string, param map[string]string) (ResData, error
 
 // doRequest 执行实际请求; allowRelogin 控制 -101 时是否自动重新扫码登录(防止无限递归)
 func doRequest(method string, api string, param map[string]string, allowRelogin bool) (ResData, error) {
+	// 请求间 1~3 秒随机小间隔, 避免零间隔连发暴露机器节奏
+	time.Sleep(time.Duration(1000+rng.Intn(2001)) * time.Millisecond)
 	var req *http.Request
 	var err error
 	if method == "POST" {
@@ -153,6 +153,9 @@ func doRequest(method string, api string, param map[string]string, allowRelogin 
 		return ResData{}, err
 	}
 	defer res.Body.Close()
+	if res.StatusCode == 412 {
+		logger.Fatal("触发风控 (HTTP 412 请求被拦截), 程序停止")
+	}
 	bytes, err := io.ReadAll(res.Body)
 	if err != nil {
 		return ResData{}, err
@@ -164,6 +167,10 @@ func doRequest(method string, api string, param map[string]string, allowRelogin 
 		return ResData{}, err
 	}
 	if rd.Code != 0 {
+		// 风控信号: 立即停止, 不重试不重登
+		if rd.Code == -412 || rd.Code == -352 {
+			logger.Fatal("触发风控 (code ", rd.Code, ": ", rd.Message, "), 程序停止")
+		}
 		// 凭证失效: 自动扫码重登并重试一次(仅非命令行参数模式)
 		if rd.Code == -101 && allowRelogin && relogin() {
 			return doRequest(method, api, param, false)
@@ -193,9 +200,44 @@ func relogin() bool {
 // userAgent 统一的浏览器 UA
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
+const buvidSpiURL = "https://api.bilibili.com/x/frontend/finger/spi"
+
+var buvid3 string
+var buvid4 string
+
+// fetchBuvid 获取浏览器指纹 cookie buvid3/buvid4; 失败仅告警, 不阻塞主流程
+func fetchBuvid() {
+	rd, err := request("GET", buvidSpiURL, make(map[string]string))
+	if err != nil {
+		logger.Warn("获取 buvid 失败(继续运行): ", err.Error())
+		return
+	}
+	if b3, ok := rd.Data["b_3"].(string); ok {
+		buvid3 = b3
+	}
+	if b4, ok := rd.Data["b_4"].(string); ok {
+		buvid4 = b4
+	}
+}
+
 func addHeader(header *http.Header) {
-	header.Set("cookie", "bili_jct="+csrf+"; SESSDATA="+sessdata+";")
+	cookie := "bili_jct=" + csrf + "; SESSDATA=" + sessdata + ";"
+	if buvid3 != "" {
+		cookie += " buvid3=" + buvid3 + ";"
+	}
+	if buvid4 != "" {
+		cookie += " buvid4=" + buvid4 + ";"
+	}
+	header.Set("cookie", cookie)
 	header.Set("User-Agent", userAgent)
-	header.Set("Referer", "https://www.bilibili.com/")
+	header.Set("Referer", "https://www.bilibili.com/judgement/")
 	header.Set("Origin", "https://www.bilibili.com")
+	header.Set("Accept", "application/json, text/plain, */*")
+	header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	header.Set("sec-ch-ua", `"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"`)
+	header.Set("sec-ch-ua-mobile", "?0")
+	header.Set("sec-ch-ua-platform", `"Windows"`)
+	header.Set("Sec-Fetch-Dest", "empty")
+	header.Set("Sec-Fetch-Mode", "cors")
+	header.Set("Sec-Fetch-Site", "same-site")
 }

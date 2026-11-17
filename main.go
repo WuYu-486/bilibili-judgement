@@ -2,9 +2,11 @@ package main
 
 import (
 	"github.com/withmandala/go-log"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Version of Program
@@ -14,6 +16,13 @@ var sessdata string
 var csrf string
 
 var logger = log.New(os.Stderr)
+
+var rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+
+// 15~30 秒随机等待, 避免固定节奏被风控识别
+func randomDelay() time.Duration {
+	return time.Duration(15+rng.Intn(16)) * time.Second
+}
 
 func main() {
 	logger.Info("Version	", Version, "	Running...")
@@ -38,6 +47,7 @@ func main() {
 		}
 	}
 	split()
+	fetchBuvid()
 	juryInfo, err := getJuryInfo()
 	if err != nil {
 		logger.Fatal("failed to fetch jury info:", err.Error())
@@ -54,8 +64,8 @@ func main() {
 	}
 	// 连续因意见不足而跳过的案件数, 用于深夜无活时的退避
 	skipCount := 0
-	// 跟投所需的最少意见数; 原版为 10, 凌晨新案意见稀少根本凑不齐, 降为 3
-	const minVotes = 3
+	// 跟投所需的最少意见数; 原版为 10, 凌晨新案意见稀少根本凑不齐, 降为 8
+	const minVotes = 8
 	for {
 		logger.Info("fetching next case...")
 		split()
@@ -107,9 +117,9 @@ func main() {
 				if opErr != nil {
 					logger.Warn("failed to fetch opinions: ", opErr.Error())
 				} else {
-					logger.Infof("Votes amount less than %d (current: %d), retry fetching after 10 seconds...", minVotes, len(opinion.List))
+					logger.Infof("Votes amount less than %d (current: %d), retry fetching later...", minVotes, len(opinion.List))
 				}
-				time.Sleep(10 * time.Second)
+				time.Sleep(time.Duration(8+rng.Intn(8)) * time.Second)
 				retryTimes++
 				opinion, opErr = getFullOpinion(caseID)
 			}
@@ -126,26 +136,69 @@ func main() {
 				maxValue = v
 			}
 		}
+		// 多数派不足 60% 时意见分歧大, 真人会犹豫, 跳过该案
+		if maxValue*100 < len(opinion.List)*60 {
+			skipCount++
+			logger.Infof("意见分歧大 (多数派 %d/%d), 跳过该案... (%d cases skipped in a row)", maxValue, len(opinion.List), skipCount)
+			if skipCount >= 10 {
+				logger.Info("Too many cases skipped in a row. Sleeping 5 minutes...")
+				time.Sleep(5 * time.Minute)
+				skipCount = 0
+			}
+			split()
+			continue
+		}
+		// 20% 概率随机复制一条同立场非空意见作为自己的投票观点
+		content := ""
+		if rng.Intn(100) < 20 {
+			var candidates []int
+			for i, s := range opinion.List {
+				if s.Vote == maxKey && s.Content != "" {
+					candidates = append(candidates, i)
+				}
+			}
+			if len(candidates) > 0 {
+				picked := opinion.List[candidates[rng.Intn(len(candidates))]]
+				content = picked.Content
+				logger.Info("携带投票观点 (复制自意见 opid=", picked.Opid, ")")
+			}
+		}
 		logger.Info("VotedKey:		", maxKey)
 		logger.Info("VotedTimes:		", maxValue)
 		logger.Info("TotalVotedTimes:	", opinion.Total)
 		logger.Info("VoteText:		", voteItem[maxKey])
 		split()
+		// 按被举报内容长度模拟阅读时间(约每秒 8 字), 夹在 2~15 秒
+		readSec := utf8.RuneCountInString(caseInfo.CaseInfo.Comment.Content) / 8
+		if readSec < 2 {
+			readSec = 2
+		}
+		if readSec > 15 {
+			readSec = 15
+		}
+		logger.Infof("reading case for %ds...", readSec)
+		time.Sleep(time.Duration(readSec) * time.Second)
 		logger.Info("claiming case...")
-		_, err = postVote(caseID, 0)
+		_, err = postVote(caseID, 0, "")
 		if err != nil {
 			logger.Fatal("failed to claim case:", err.Error())
 		}
-		logger.Info("claim succeeded. sleeping for 15s...")
-		time.Sleep(15 * time.Second)
+		// 投票冷却取官方 vote_cd 与随机值中的较大者
+		d := randomDelay()
+		if cd := time.Duration(caseInfo.VoteCd) * time.Second; cd > d {
+			d = cd
+		}
+		logger.Infof("claim succeeded. sleeping for %v...", d)
+		time.Sleep(d)
 		logger.Info("voting ...")
-		_, err = postVote(caseID, maxKey)
+		_, err = postVote(caseID, maxKey, content)
 		if err != nil {
 			logger.Fatal("failed to vote:", err.Error())
 		}
-		logger.Info("vote succeeded. sleeping for 15s to next round...")
+		d = randomDelay()
+		logger.Infof("vote succeeded. sleeping for %v to next round...", d)
 		split()
-		time.Sleep(15 * time.Second)
+		time.Sleep(d)
 		// 成功投出一案, 重置连续跳过计数
 		skipCount = 0
 	}

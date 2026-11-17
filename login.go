@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/skip2/go-qrcode"
@@ -109,8 +110,12 @@ func qrLogin() (string, string, error) {
 	fmt.Println()
 	fmt.Println(qr.ToSmallString(false))
 	fmt.Println("请用 B 站手机 App 扫描上方二维码登录(或已弹出的 qr.png)")
-	// 尝试用系统默认看图工具打开二维码图片
-	_ = exec.Command("cmd", "/c", "start", "", qrImageFile).Start()
+	// 尝试用系统默认看图工具打开二维码图片(SSH/无桌面环境下失败则忽略, 依赖终端 ASCII 码)
+	if runtime.GOOS == "windows" {
+		_ = exec.Command("cmd", "/c", "start", "", qrImageFile).Start()
+	} else {
+		_ = exec.Command("xdg-open", qrImageFile).Start()
+	}
 
 	// 3. 轮询扫码状态
 	deadline := time.Now().Add(3 * time.Minute)
